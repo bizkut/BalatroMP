@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  balatro-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./saves:/usr/src/app/saves
+    environment:
+      - NODE_ENV=production # Example environment variable
+    # restart: unless-stopped # Optional: for auto-restarting the container
+    container_name: balatro_web_app
+networks:
+  default:
+    name: balatro_network
+    driver: bridge

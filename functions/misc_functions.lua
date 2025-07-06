@@ -1477,10 +1477,10 @@ function save_run()
     BACK = G.GAME.selected_back:save(),
     VERSION = G.VERSION
   }
-  G.ARGS.save_run = G.culled_table
+  G.ARGS.save_run = deepcopy(G.culled_table) -- Use deepcopy here
 
   G.FILE_HANDLER = G.FILE_HANDLER or {}
-  G.FILE_HANDLER.run = true
+  G.FILE_HANDLER.run_pending = true -- Changed flag
   G.FILE_HANDLER.update_queued = true
 end
 

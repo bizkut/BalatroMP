@@ -6,38 +6,151 @@ function Game:init()
     G = self
 
     self:set_globals()
+    self.loading_states = {
+        settings_loaded = false,
+        profile_loaded = false,
+        meta_loaded = false,
+        run_loaded = false, -- For continuing a game
+        all_initial_data_loaded = false
+    }
+    self.pending_profile_to_load = 1
+end
+
+-- Global callbacks for loading data, to be defined in _G for web_api.lua
+_G.handle_loaded_settings = function(success, data_table_or_error_msg)
+    if success and type(data_table_or_error_msg) == 'table' then
+        local settings_file = data_table_or_error_msg
+        if G.VERSION >= '1.0.0' and (love.system.getOS() == 'NOPE') and ((not settings_file.version) or (settings_file.version < '1.0.0')) then 
+            -- This logic seems specific and might need review for web version (profile deletion)
+            for i = 1, 3 do
+                -- TODO: How to handle profile deletion on web? Possibly send API calls. For now, this part is problematic.
+                print("Warning: Profile deletion logic during settings load needs web adaptation.")
+            end
+            for k, v in pairs(settings_file) do G.SETTINGS[k] = v end
+            G.SETTINGS.profile = 1
+            G.SETTINGS.tutorial_progress = nil
+        else 
+            if G.VERSION < '1.0.0' then G.SETTINGS.version_loaded = settings_file.version end -- temp store
+            for k, v in pairs(settings_file) do G.SETTINGS[k] = v end
+        end
+        print("Settings loaded from web.")
+    elseif success and data_table_or_error_msg == nil then
+        print("No settings file found on server, using defaults.")
+        -- G.SETTINGS will retain its defaults initialized in set_globals()
+    else
+        print("Failed to load settings from web or error: ", success, data_table_or_error_msg)
+        -- Potentially use default settings or show an error
+    end
+    G.SETTINGS.version = G.SETTINGS.version_loaded or G.VERSION
+    G.SETTINGS.version_loaded = nil -- clean up
+    G.SETTINGS.paused = nil
+    G.loading_states.settings_loaded = true
+end
+
+_G.handle_loaded_profile = function(success, data_table_or_error_msg)
+    local profile_num_loaded = G.pending_profile_to_load or G.SETTINGS.profile or 1
+    if success and type(data_table_or_error_msg) == 'table' then
+        for k, v in pairs(data_table_or_error_msg) do
+            G.PROFILES[profile_num_loaded][k] = v
+        end
+        print("Profile " .. profile_num_loaded .. " loaded from web.")
+    elseif success and data_table_or_error_msg == nil then
+        print("No profile file found on server for profile " .. profile_num_loaded .. ", using defaults.")
+        -- G.PROFILES[profile_num_loaded] will retain its defaults
+    else
+        print("Failed to load profile " .. profile_num_loaded .. " from web or error: ", success, data_table_or_error_msg)
+    end
+    G.loading_states.profile_loaded = true
+end
+
+_G.handle_loaded_meta = function(success, data_table_or_error_msg)
+    local current_profile_num = G.SETTINGS.profile or 1
+    if success and type(data_table_or_error_msg) == 'table' then
+        G.loaded_meta_data = data_table_or_error_msg -- Store temporarily
+        print("Meta for profile " .. current_profile_num .. " loaded from web.")
+    elseif success and data_table_or_error_msg == nil then
+        print("No meta file found on server for profile " .. current_profile_num .. ", using defaults.")
+        G.loaded_meta_data = { unlocked = {}, discovered = {}, alerted = {} }
+    else
+        print("Failed to load meta for profile " .. current_profile_num .. " from web or error: ", success, data_table_or_error_msg)
+        G.loaded_meta_data = { unlocked = {}, discovered = {}, alerted = {} } -- Default on error
+    end
+    G.loading_states.meta_loaded = true
+end
+
+_G.handle_loaded_run_to_continue = function(success, data_table_or_error_msg)
+    if success and type(data_table_or_error_msg) == 'table' then
+        G.SAVED_GAME_FROM_WEB = data_table_or_error_msg
+        print("Run data loaded from web for continuation.")
+    elseif success and data_table_or_error_msg == nil then
+        print("No saved run found on server.")
+        G.SAVED_GAME_FROM_WEB = nil
+    else
+        print("Failed to load run from web or error: ", success, data_table_or_error_msg)
+        G.SAVED_GAME_FROM_WEB = nil
+    end
+    G.loading_states.run_loaded = true
+    -- Now the main menu can proceed to call start_run with G.SAVED_GAME_FROM_WEB
 end
 
 function Game:start_up()
-    --Load the settings file
-    local settings = get_compressed('settings.jkr')
-    local settings_ver = nil
-    if settings then 
-        local settings_file = STR_UNPACK(settings)
-        if G.VERSION >= '1.0.0' and (love.system.getOS() == 'NOPE') and ((not settings_file.version) or (settings_file.version < '1.0.0')) then 
-            for i = 1, 3 do
-                love.filesystem.remove(i..'/'..'profile.jkr')
-                love.filesystem.remove(i..'/'..'save.jkr')
-                love.filesystem.remove(i..'/'..'meta.jkr')
-                love.filesystem.remove(i..'/'..'unlock_notify.jkr')
-                love.filesystem.remove(i..'')
-            end
-            for k, v in pairs(settings_file) do
-                self.SETTINGS[k] = v
-            end
-            self.SETTINGS.profile = 1
-            self.SETTINGS.tutorial_progress = nil
-        else 
-            if G.VERSION < '1.0.0' then 
-                settings_ver = settings_file.version
-            end
-            for k, v in pairs(settings_file) do
-                self.SETTINGS[k] = v
+    if G.SaveManager and love.system.getOS() == "Web" then
+        print("Game:start_up - Attempting to load settings from web...")
+        G.SaveManager.LoadDataWeb('settings', '_G.handle_loaded_settings')
+        -- Further initialization will need to wait for this callback.
+        -- This requires refactoring start_up into a state machine or series of callbacks.
+    else
+        -- Original file-based loading for non-web or if SaveManager is not ready
+        local settings = get_compressed('settings.jkr')
+        local settings_ver_local = nil -- Renamed to avoid conflict
+        if settings then
+            local settings_file = STR_UNPACK(settings)
+            if G.VERSION >= '1.0.0' and (love.system.getOS() == 'NOPE') and ((not settings_file.version) or (settings_file.version < '1.0.0')) then
+                for i = 1, 3 do
+                    love.filesystem.remove(i..'/'..'profile.jkr')
+                    love.filesystem.remove(i..'/'..'save.jkr')
+                    love.filesystem.remove(i..'/'..'meta.jkr')
+                    love.filesystem.remove(i..'/'..'unlock_notify.jkr')
+                    love.filesystem.remove(i..'')
+                end
+                for k, v in pairs(settings_file) do
+                    self.SETTINGS[k] = v
+                end
+                self.SETTINGS.profile = 1
+                self.SETTINGS.tutorial_progress = nil
+            else
+                if G.VERSION < '1.0.0' then
+                    settings_ver_local = settings_file.version
+                end
+                for k, v in pairs(settings_file) do
+                    self.SETTINGS[k] = v
+                end
             end
         end
+        self.SETTINGS.version = settings_ver_local or G.VERSION
+        self.SETTINGS.paused = nil
+        self.loading_states.settings_loaded = true -- Mark as loaded for non-web path
     end
-    self.SETTINGS.version = settings_ver or G.VERSION
-    self.SETTINGS.paused = nil
+
+    -- This is a temporary, blocking wait. Ideally, this whole function becomes event-driven.
+    local start_wait_time = love.timer.getTime()
+    while not self.loading_states.settings_loaded and love.system.getOS() == "Web" do
+        love.event.pump() -- Keep event queue flowing for JS callbacks
+        if love.timer then love.timer.sleep(0.01) else os.execute("sleep 0.01") end -- Ensure sleep is available
+        if love.timer and love.timer.getTime() - start_wait_time > 10 then -- Timeout after 10 seconds
+            print("Timeout waiting for settings to load. Proceeding with defaults.")
+            if not self.loading_states.settings_loaded then _G.handle_loaded_settings(false, "Timeout") end
+            break
+        elseif not love.timer and os.time() - start_wait_time > 10 then -- Fallback for os.time if love.timer is missing
+             print("Timeout waiting for settings to load (os.time). Proceeding with defaults.")
+            if not self.loading_states.settings_loaded then _G.handle_loaded_settings(false, "Timeout") end
+            break
+        end
+    end
+    print("Game:start_up - Proceeding after settings load attempt.")
+
+    -- The rest of start_up depends on G.SETTINGS being populated.
+    -- local settings_ver = self.SETTINGS.version -- This was used if G.VERSION < '1.0.0'
 
     local new_colour_proto = self.C["SO_"..(self.SETTINGS.colourblind_option and 2 or 1)]
     self.C.SUITS.Hearts = new_colour_proto.Hearts
@@ -726,8 +839,8 @@ function Game:init_item_prototypes()
 
     self.P_LOCKED = {}
 
-    self:save_progress()
-
+    self:save_progress() # This call here will be problematic for web if save_progress itself becomes async or tries to save immediately.
+                         # For now, assuming save_progress just prepares data in G.ARGS for later.
 
     -------------------------------------
     local TESTHELPER_unlocks = false and not _RELEASE_MODE
@@ -735,14 +848,119 @@ function Game:init_item_prototypes()
     if not love.filesystem.getInfo(G.SETTINGS.profile..'') then love.filesystem.createDirectory( G.SETTINGS.profile..'' ) end
     if not love.filesystem.getInfo(G.SETTINGS.profile..'/'..'meta.jkr') then love.filesystem.append( G.SETTINGS.profile..'/'..'meta.jkr', 'return {}') end
 
-    convert_save_to_meta()
+    convert_save_to_meta() -- This function might also need adaptation if it relies on filesystem directly.
 
-    local meta = STR_UNPACK(get_compressed(G.SETTINGS.profile..'/'..'meta.jkr') or 'return {}')
-    meta.unlocked = meta.unlocked or {}
-    meta.discovered = meta.discovered or {}
-    meta.alerted = meta.alerted or {}
-    
-    for k, v in pairs(self.P_CENTERS) do
+    if G.SaveManager and love.system.getOS() == "Web" then
+        print("Game:init_item_prototypes - Attempting to load meta for profile " .. G.SETTINGS.profile .. " from web...")
+        G.SaveManager.LoadDataWeb('meta' .. G.SETTINGS.profile, '_G.handle_loaded_meta')
+    else
+        local meta_string = get_compressed(G.SETTINGS.profile..'/'..'meta.jkr') or 'return {}'
+        _G.handle_loaded_meta(true, STR_UNPACK(meta_string)) -- Call handler directly for non-web
+    end
+
+    -- Wait for meta to be loaded. This is a temporary, blocking wait.
+    local start_wait_time = love.timer.getTime()
+    while not self.loading_states.meta_loaded and love.system.getOS() == "Web" do
+        love.event.pump()
+        if love.timer then love.timer.sleep(0.01) else os.execute("sleep 0.01") end
+        if love.timer and love.timer.getTime() - start_wait_time > 5 then
+             print("Timeout waiting for meta to load.")
+             if not self.loading_states.meta_loaded then _G.handle_loaded_meta(false, "Timeout") end
+             break
+        elseif not love.timer and os.time() - start_wait_time > 5 then -- Fallback for os.time
+             print("Timeout waiting for meta to load (os.time).")
+             if not self.loading_states.meta_loaded then _G.handle_loaded_meta(false, "Timeout") end
+             break
+        end
+    end
+    print("Game:init_item_prototypes - Proceeding after meta load attempt.")
+
+    -- Process loaded meta data (G.loaded_meta_data is populated by _G.handle_loaded_meta)
+    if G.loaded_meta_data then
+        local meta = G.loaded_meta_data
+        meta.unlocked = meta.unlocked or {}
+        meta.discovered = meta.discovered or {}
+        meta.alerted = meta.alerted or {}
+
+        for k, v in pairs(self.P_CENTERS) do
+            if not v.wip and not v.demo then
+                if TESTHELPER_unlocks then v.unlocked = true; v.discovered = true;v.alerted = true end --REMOVE THIS
+                if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) and meta.unlocked[k] then
+                    v.unlocked = true
+                end
+                if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) then self.P_LOCKED[#self.P_LOCKED+1] = v end
+                if not v.discovered and (string.find(k, '^j_') or string.find(k, '^e_') or string.find(k, '^c_') or string.find(k, '^p_') or string.find(k, '^v_')) and meta.discovered[k] then
+                    v.discovered = true
+                end
+                if v.discovered and meta.alerted[k] or v.set == 'Back' or v.start_alerted then
+                    v.alerted = true
+                elseif v.discovered then
+                    v.alerted = false
+                end
+            end
+        end
+        -- Apply similar logic for P_BLINDS, P_TAGS, P_SEALS using the loaded `meta` table
+        for k, v in pairs(self.P_BLINDS) do
+            v.key = k
+            if not v.wip and not v.demo then
+                if TESTHELPER_unlocks then v.discovered = true; v.alerted = true  end --REMOVE THIS
+                if not v.discovered and meta.discovered[k] then
+                    v.discovered = true
+                end
+                if v.discovered and meta.alerted[k] then
+                    v.alerted = true
+                elseif v.discovered then
+                    v.alerted = false
+                end
+            end
+        end
+        for k, v in pairs(self.P_TAGS) do
+            v.key = k
+            if not v.wip and not v.demo then
+                if TESTHELPER_unlocks then v.discovered = true; v.alerted = true  end --REMOVE THIS
+                if not v.discovered and meta.discovered[k] then
+                    v.discovered = true
+                end
+                if v.discovered and meta.alerted[k] then
+                    v.alerted = true
+                elseif v.discovered then
+                    v.alerted = false
+                end
+                table.insert(self.P_CENTER_POOLS['Tag'], v)
+            end
+        end
+        for k, v in pairs(self.P_SEALS) do
+            v.key = k
+            if not v.wip and not v.demo then
+                if TESTHELPER_unlocks then v.discovered = true; v.alerted = true  end --REMOVE THIS
+                if not v.discovered and meta.discovered[k] then
+                    v.discovered = true
+                end
+                if v.discovered and meta.alerted[k] then
+                    v.alerted = true
+                elseif v.discovered then
+                    v.alerted = false
+                end
+                table.insert(self.P_CENTER_POOLS['Seal'], v)
+            end
+        end
+
+        G.loaded_meta_data = nil -- Clear temporary storage
+    else
+        print("Warning: Meta data was not available for init_item_prototypes.")
+        -- Initialize P_LOCKED if it's not already
+        self.P_LOCKED = self.P_LOCKED or {}
+        -- Populate P_CENTER_POOLS['Tag'] and P_CENTER_POOLS['Seal'] even if meta is missing
+        for k, v in pairs(self.P_TAGS) do if not v.wip and not v.demo then table.insert(self.P_CENTER_POOLS['Tag'], v) end end
+        for k, v in pairs(self.P_SEALS) do if not v.wip and not v.demo then table.insert(self.P_CENTER_POOLS['Seal'], v) end end
+    end
+
+    -- This part of the original code is now inside the `if G.loaded_meta_data then` block above.
+    -- local meta = STR_UNPACK(get_compressed(G.SETTINGS.profile..'/'..'meta.jkr') or 'return {}')
+    -- meta.unlocked = meta.unlocked or {}
+    -- meta.discovered = meta.discovered or {}
+    -- meta.alerted = meta.alerted or {}
+    -- for k, v in pairs(self.P_CENTERS) do
         if not v.wip and not v.demo then 
             if TESTHELPER_unlocks then v.unlocked = true; v.discovered = true;v.alerted = true end --REMOVE THIS
             if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) and meta.unlocked[k] then 
@@ -845,15 +1063,41 @@ end
 function Game:load_profile(_profile)
     if not G.PROFILES[_profile] then _profile = 1 end
     G.SETTINGS.profile = _profile
-    
-    --Load the settings file
-    local info = get_compressed(_profile..'/profile.jkr')
-    if info ~= nil then
-        for k, v in pairs(STR_UNPACK(info)) do
-            G.PROFILES[G.SETTINGS.profile][k] = v
+    G.pending_profile_to_load = _profile -- Store which profile is being loaded for the callback
+
+    if G.SaveManager and love.system.getOS() == "Web" then
+        print("Game:load_profile - Attempting to load profile " .. _profile .. " from web...")
+        G.SaveManager.LoadDataWeb('profile' .. _profile, '_G.handle_loaded_profile')
+        -- This is asynchronous. The game logic must wait for self.loading_states.profile_loaded
+    else
+        local info = get_compressed(_profile..'/profile.jkr')
+        if info ~= nil then
+            for k, v in pairs(STR_UNPACK(info)) do
+                G.PROFILES[G.SETTINGS.profile][k] = v -- Should be G.PROFILES[_profile]
+            end
         end
+        self.loading_states.profile_loaded = true -- Mark as loaded for non-web
     end
 
+    -- Wait for profile to be loaded if it's a web load.
+    -- This is a temporary, blocking wait.
+    local start_wait_time = love.timer.getTime()
+    while not self.loading_states.profile_loaded and love.system.getOS() == "Web" do
+        love.event.pump()
+        if love.timer then love.timer.sleep(0.01) else os.execute("sleep 0.01") end
+        if love.timer and love.timer.getTime() - start_wait_time > 5 then
+             print("Timeout waiting for profile " .. _profile .. " to load.")
+             if not self.loading_states.profile_loaded then _G.handle_loaded_profile(false, "Timeout") end
+             break
+        elseif not love.timer and os.time() - start_wait_time > 5 then -- Fallback for os.time
+             print("Timeout waiting for profile " .. _profile .. " to load (os.time).")
+             if not self.loading_states.profile_loaded then _G.handle_loaded_profile(false, "Timeout") end
+             break
+        end
+    end
+    print("Game:load_profile - Proceeding after profile load attempt for profile " .. _profile)
+
+    -- Initialize profile structure if it's still empty after load attempt
     local temp_profile = {
         MEMORY = {
             deck = 'Red Deck',
@@ -1141,8 +1385,8 @@ end
 function Game:save_progress()
     G.ARGS.save_progress = G.ARGS.save_progress or {}
     G.ARGS.save_progress.UDA = EMPTY(G.ARGS.save_progress.UDA)
-    G.ARGS.save_progress.SETTINGS = G.SETTINGS
-    G.ARGS.save_progress.PROFILE = G.PROFILES[G.SETTINGS.profile]
+    G.ARGS.save_progress.SETTINGS = deepcopy(G.SETTINGS) -- Use deepcopy to avoid issues with ongoing changes
+    G.ARGS.save_progress.PROFILE = deepcopy(G.PROFILES[G.SETTINGS.profile]) -- Use deepcopy
 
     for k, v in pairs(self.P_CENTERS) do
         G.ARGS.save_progress.UDA[k] = (v.unlocked and 'u' or '')..(v.discovered and 'd' or '')..(v.alerted and 'a' or '')
@@ -1158,7 +1402,7 @@ function Game:save_progress()
     end
 
     G.FILE_HANDLER = G.FILE_HANDLER or {}
-    G.FILE_HANDLER.progress = true
+    G.FILE_HANDLER.progress_pending = true -- Changed flag
     G.FILE_HANDLER.update_queued = true
 end
 
@@ -1170,17 +1414,17 @@ function Game:save_notify(card)
       })
 end
 
-function Game:save_settings()
-    G.ARGS.save_settings = G.SETTINGS
+function Game:save_settings_command() -- Renamed to avoid conflict with G.FILE_HANDLER.settings flag
+    G.ARGS.save_settings_data = deepcopy(G.SETTINGS) -- Store data in a different key, deepcopy
     G.FILE_HANDLER = G.FILE_HANDLER or {}
-    G.FILE_HANDLER.settings = true
+    G.FILE_HANDLER.settings_pending = true -- Use a different flag
     G.FILE_HANDLER.update_queued = true
 end
 
-function Game:save_metrics()
-    G.ARGS.save_metrics = G.METRICS
+function Game:save_metrics_command() -- Renamed
+    G.ARGS.save_metrics_data = deepcopy(G.METRICS) -- deepcopy
     G.FILE_HANDLER = G.FILE_HANDLER or {}
-    G.FILE_HANDLER.settings = true
+    G.FILE_HANDLER.metrics_pending = true -- Use a different flag
     G.FILE_HANDLER.update_queued = true
 end
 
@@ -2615,49 +2859,108 @@ function Game:update(dt)
 
     
     --Save every 10 seconds, unless forced or paused/unpaused
-    if G.FILE_HANDLER and G.FILE_HANDLER and G.FILE_HANDLER.update_queued and (
+    if G.FILE_HANDLER and G.FILE_HANDLER.update_queued and (
         G.FILE_HANDLER.force or 
         G.FILE_HANDLER.last_sent_stage ~= G.STAGE or
-        ((G.FILE_HANDLER.last_sent_pause ~= G.SETTINGS.paused) and G.FILE_HANDLER.run) or
+        ((G.FILE_HANDLER.last_sent_pause ~= G.SETTINGS.paused) and (G.FILE_HANDLER.run_pending or G.FILE_HANDLER.progress_pending)) or -- check specific pending flags
         (not G.FILE_HANDLER.last_sent_time or (G.FILE_HANDLER.last_sent_time < (G.TIMERS.UPTIME - G.F_SAVE_TIMER)))) then 
             
-            if G.FILE_HANDLER.metrics then
-                G.SAVE_MANAGER.channel:push({
-                    type = 'save_metrics',
-                    save_metrics = G.ARGS.save_metrics
-                  })
-            end
+            if G.SaveManager and love.system.getOS() == "Web" then
+                if G.FILE_HANDLER.metrics_pending then
+                    G.SaveManager.SaveMetaWeb(G.SETTINGS.profile, G.ARGS.save_metrics_data) -- Assuming metrics are part of meta for web
+                    G.FILE_HANDLER.metrics_pending = nil
+                end
 
-            if G.FILE_HANDLER.progress then
-                G.SAVE_MANAGER.channel:push({
-                    type = 'save_progress',
-                    save_progress = G.ARGS.save_progress
-                  })
-            elseif G.FILE_HANDLER.settings then
-                G.SAVE_MANAGER.channel:push({
-                    type = 'save_settings',
-                    save_settings = G.ARGS.save_settings,
-                    profile_num = G.SETTINGS.profile,
-                    save_profile = G.PROFILES[G.SETTINGS.profile]
-                  })
-            end
+                if G.FILE_HANDLER.progress_pending then
+                    -- This is complex due to meta read-modify-write.
+                    -- 1. Save Settings
+                    if G.ARGS.save_progress.SETTINGS then
+                        G.SaveManager.SaveSettingsWeb(G.ARGS.save_progress.SETTINGS)
+                    end
+                    -- 2. Save Profile
+                    if G.ARGS.save_progress.PROFILE then
+                         G.SaveManager.SaveProfileWeb(G.SETTINGS.profile, G.ARGS.save_progress.PROFILE)
+                    end
+                    -- 3. Load Meta, Modify, Save Meta (UDA part)
+                    if G.ARGS.save_progress.UDA then
+                        local current_profile_num_for_meta = G.SETTINGS.profile
+                        local uda_to_apply = G.ARGS.save_progress.UDA
+                        -- Define a temporary global callback for loading meta then saving it
+                        local meta_save_callback_name = "_G.temp_meta_load_then_save_cb"
+                        _G[meta_save_callback_name] = function(success, loaded_meta_data_str)
+                            local meta_table_to_save
+                            if success and loaded_meta_data_str then meta_table_to_save = STR_UNPACK(loaded_meta_data_str) else meta_table_to_save = { unlocked = {}, discovered = {}, alerted = {} } end
 
-            if G.FILE_HANDLER.run then
-                G.SAVE_MANAGER.channel:push({
-                    type = 'save_run',
-                    save_table = G.ARGS.save_run,
-                    profile_num = G.SETTINGS.profile})
-                G.SAVED_GAME = nil
+                            meta_table_to_save.unlocked = meta_table_to_save.unlocked or {}
+                            meta_table_to_save.discovered = meta_table_to_save.discovered or {}
+                            meta_table_to_save.alerted = meta_table_to_save.alerted or {}
+
+                            for k_uda, v_uda in pairs(uda_to_apply) do
+                                if string.find(v_uda, 'u') then meta_table_to_save.unlocked[k_uda] = true end
+                                if string.find(v_uda, 'd') then meta_table_to_save.discovered[k_uda] = true end
+                                if string.find(v_uda, 'a') then meta_table_to_save.alerted[k_uda] = true end
+                            end
+                            G.SaveManager.SaveMetaWeb(current_profile_num_for_meta, meta_table_to_save)
+                            _G[meta_save_callback_name] = nil -- Clean up temp callback
+                        end
+                        G.SaveManager.LoadDataWeb('meta'..current_profile_num_for_meta, meta_save_callback_name)
+                    end
+                    G.FILE_HANDLER.progress_pending = nil
+
+                elseif G.FILE_HANDLER.settings_pending then -- Note: 'elseif' means progress takes precedence
+                    if G.ARGS.save_settings_data then
+                        G.SaveManager.SaveSettingsWeb(G.ARGS.save_settings_data)
+                    end
+                    -- Settings save in original game also saved current profile
+                    if G.PROFILES and G.PROFILES[G.SETTINGS.profile] then
+                         G.SaveManager.SaveProfileWeb(G.SETTINGS.profile, G.PROFILES[G.SETTINGS.profile])
+                    end
+                    G.FILE_HANDLER.settings_pending = nil
+                end
+
+                if G.FILE_HANDLER.run_pending then
+                    if G.ARGS.save_run then
+                        G.SaveManager.SaveRunWeb(G.SETTINGS.profile, G.ARGS.save_run)
+                    end
+                    G.SAVED_GAME = nil -- Assuming this is for local save caching
+                    G.FILE_HANDLER.run_pending = nil
+                end
+
+            else -- Original non-web saving logic
+                if G.FILE_HANDLER.metrics_pending then
+                    G.SAVE_MANAGER.channel:push({ type = 'save_metrics', save_metrics = G.ARGS.save_metrics_data })
+                    G.FILE_HANDLER.metrics_pending = nil
+                end
+                if G.FILE_HANDLER.progress_pending then
+                     G.SAVE_MANAGER.channel:push({ type = 'save_progress', save_progress = G.ARGS.save_progress })
+                     G.FILE_HANDLER.progress_pending = nil
+                elseif G.FILE_HANDLER.settings_pending then
+                    G.SAVE_MANAGER.channel:push({
+                        type = 'save_settings',
+                        save_settings = G.ARGS.save_settings_data,
+                        profile_num = G.SETTINGS.profile,
+                        save_profile = G.PROFILES[G.SETTINGS.profile]
+                      })
+                    G.FILE_HANDLER.settings_pending = nil
+                end
+                if G.FILE_HANDLER.run_pending then
+                    G.SAVE_MANAGER.channel:push({
+                        type = 'save_run',
+                        save_table = G.ARGS.save_run,
+                        profile_num = G.SETTINGS.profile})
+                    G.SAVED_GAME = nil
+                    G.FILE_HANDLER.run_pending = nil
+                end
             end
 
             G.FILE_HANDLER.force = false
             G.FILE_HANDLER.last_sent_stage = G.STAGE
             G.FILE_HANDLER.last_sent_time = G.TIMERS.UPTIME
             G.FILE_HANDLER.last_sent_pause = G.SETTINGS.paused
-            G.FILE_HANDLER.settings = nil
-            G.FILE_HANDLER.progress = nil
-            G.FILE_HANDLER.metrics = nil
-            G.FILE_HANDLER.run = nil
+            -- Reset update_queued only if all pending flags are false
+            if not (G.FILE_HANDLER.progress_pending or G.FILE_HANDLER.settings_pending or G.FILE_HANDLER.run_pending or G.FILE_HANDLER.metrics_pending) then
+                G.FILE_HANDLER.update_queued = false
+            end
     end  
 end
 
