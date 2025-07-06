@@ -2,7 +2,7 @@
 FROM node:18-alpine AS builder
 
 # Install git and zip
-RUN apk add --no-cache git zip
+RUN apk add --no-cache git zip findutils
 
 # Clone Davidobot/love.js repository
 WORKDIR /opt
@@ -10,43 +10,39 @@ RUN git clone --depth 1 https://github.com/Davidobot/love.js.git love.js-davidob
 
 # Install dependencies for the cloned love.js CLI tool
 WORKDIR /opt/love.js-davidobot
-# Check if package.json exists before running npm install
-# Some versions/forks might not have it or might bundle dependencies.
-# Davidobot/love.js does have a package.json with commander.
 RUN if [ -f package.json ]; then npm install; fi
 
+# Set up the main application code and build game.love
 WORKDIR /usr/src/app
 
-# Copy essential files for the build process first
-COPY package.json ./
-COPY package-lock.json* ./
-COPY main.lua ./
-COPY conf.lua ./
-COPY web_api.lua ./
-COPY engine ./engine
-COPY functions ./functions
-COPY resources ./resources
-COPY localization ./localization
-COPY *.lua ./
+# Copy all game source files (project root is the build context)
+COPY . .
 
-# The package.json's build:lovejs script is:
-# "build:lovejs": "mkdir -p /tmp/gamedata && cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua web_api.lua /tmp/gamedata/ 2>/dev/null || : && cd /tmp/gamedata && zip -r /tmp/game.love . && cd /usr/src/app && love.js /tmp/game.love ./game_web -c --title Balatro && rm -rf /tmp/gamedata /tmp/game.love"
-# We need to replace the `love.js` command in that script or call our cloned version directly.
-# For clarity, let's do the packaging steps directly here instead of relying on package.json for this part.
+# Create the .love file more robustly
+RUN mkdir -p /tmp/gamedata_for_love_file
 
-# 1. Create a temporary directory for game files
-RUN mkdir -p /tmp/gamedata
-# 2. Copy necessary game files to /tmp/gamedata
-# Using existing files in /usr/src/app after the COPY operations above
-RUN cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua web_api.lua /tmp/gamedata/ 2>/dev/null || :
-# 3. Create game.love
-RUN cd /tmp/gamedata && zip -r /tmp/game.love .
-# 4. Run the cloned love.js CLI on the game.love
-# The output path ./game_web will be relative to /usr/src/app
-# Allocate 128MB of memory for the Emscripten module (128 * 1024 * 1024 = 134217728 bytes)
+# Copy all .lua files from current WORKDIR root to staging area
+# Also copy main.lua and conf.lua explicitly to ensure they are present.
+RUN find . -maxdepth 1 -name '*.lua' -exec cp -t /tmp/gamedata_for_love_file/ {} + 2>/dev/null || :
+RUN cp main.lua /tmp/gamedata_for_love_file/main.lua
+RUN cp conf.lua /tmp/gamedata_for_love_file/conf.lua
+RUN if [ -f web_api.lua ]; then cp web_api.lua /tmp/gamedata_for_love_file/web_api.lua; fi
+
+# Copy essential directories
+RUN cp -R engine /tmp/gamedata_for_love_file/engine
+RUN cp -R functions /tmp/gamedata_for_love_file/functions
+RUN cp -R resources /tmp/gamedata_for_love_file/resources
+RUN cp -R localization /tmp/gamedata_for_love_file/localization
+# Add any other directories that are part of your game at the root level
+
+# Create game.love
+RUN cd /tmp/gamedata_for_love_file && zip -r /tmp/game.love . && cd /usr/src/app
+
+# Run the cloned love.js CLI on the game.love
 RUN node /opt/love.js-davidobot/index.js /tmp/game.love ./game_web -c --title Balatro -m 134217728
-# 5. Clean up (optional in builder, but good practice)
-RUN rm -rf /tmp/gamedata /tmp/game.love
+
+# Clean up temporary files
+RUN rm -rf /tmp/gamedata_for_love_file /tmp/game.love
 
 
 # Stage 2: Setup the Node.js server and serve the packaged game
