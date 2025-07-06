@@ -1,25 +1,31 @@
 # Stage 1: Build the love.js package using npm version of love.js CLI
 FROM node:18-alpine AS builder
 
-# Install zip for creating .love file (optional, but good practice if we decide to make a .love first)
-# and install love.js globally
 RUN apk add --no-cache zip && npm install love.js --global
 
 WORKDIR /usr/src/app
 
-# Copy all application code
-# Note: If the project is large, selectively copying (package.json first, then sources) is better for caching.
-# For simplicity here, copying all. This assumes package.json is at the root of the context.
-COPY . .
+# Copy essential files for the build process first
+COPY package.json ./
+COPY package-lock.json* ./
+# If your main.lua, conf.lua are not at root, adjust paths or copy them specifically
+COPY main.lua ./
+COPY conf.lua ./
+COPY web_api.lua ./
+# Copy directories needed for the game
+COPY engine ./engine
+COPY functions ./functions
+COPY resources ./resources
+COPY localization ./localization
+# Add any other root .lua files or essential assets needed for the .love file or love.js packaging
+COPY *.lua ./ 2>/dev/null || :
 
-# Option 1: Package the current directory directly (if main.lua and conf.lua are at root)
-# RUN love.js . ./game_web -c --title Balatro
-# This command is now typically run via npm scripts as defined in package.json
+# Install npm dependencies (if love.js CLI is part of devDependencies and not installed globally)
+# RUN npm install
 
-# Option 2: Or, if package.json has the build script (more common)
-# First, ensure all dependencies (including dev like love.js if not global) are installed
-# RUN npm install # This would install love.js if it's in devDependencies
-RUN npm run build:lovejs # This script in package.json should be: "love.js . game_web -c --title Balatro"
+# Run the build script defined in package.json
+# This script should handle creating game.love and then running love.js CLI
+RUN npm run build:lovejs
 
 # Stage 2: Setup the Node.js server and serve the packaged game
 FROM node:18-alpine
@@ -32,16 +38,18 @@ COPY package-lock.json* ./
 RUN npm install --omit=dev --ignore-scripts
 
 # Copy the server application files
-COPY server.js ./
-COPY web_api.lua ./
-COPY index.html ./ # This is the root index.html for the Davidobot/love.js style player
+COPY server.js ./server.js
+COPY web_api.lua ./web_api.lua
+# Explicitly copy index.html from the build context's root to the current directory in the image
+COPY ./index.html ./index.html
 
 # Copy the packaged game from the builder stage
 COPY --from=builder /usr/src/app/game_web ./game_web
 
 # Create and set permissions for the saves directory
 RUN mkdir -p saves && chown -R node:node /usr/src/app/saves \
-    && chown -R node:node /usr/src/app/game_web # Ensure node user owns game_web too
+    && chown -R node:node /usr/src/app/game_web \
+    && chown node:node /usr/src/app/index.html # Also chown the copied index.html
 
 # Expose Port
 EXPOSE 3000
