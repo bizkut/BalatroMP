@@ -1,56 +1,53 @@
-# 1. Base Image
+# Stage 1: Build the .love file and then the love.js package
 FROM node:18-alpine AS builder
 
-# 2. Working Directory
-WORKDIR /usr/src/app
+# Install zip for creating .love file and love.js globally
+RUN apk add --no-cache zip && npm install love.js --global
 
-# 3. Copy package.json and install dependencies
-COPY package.json ./
-# If package-lock.json exists, copy it too for deterministic installs
-COPY package-lock.json* ./
-RUN npm install --omit=dev
-# Install love.js globally or as a dev dependency if needed for build script.
-# For the build script "npm run build:lovejs", love.js needs to be available.
-# If it's in devDependencies, npm install (without --omit=dev) would get it.
-# Or install it globally for the build stage:
-RUN npm install love.js --global
+WORKDIR /usr/src/build
 
-# 4. Copy Application Code
-COPY . .
+# Copy all game source files into a temporary directory for packaging
+# This includes Lua files at the root, and all subdirectories like engine/, functions/, resources/, localization/
+COPY ./ /tmp/balatro-game-source/
 
-# 5. Build Love.js Game
-# Ensure the output directory 'game_web' is writable by the node user
-# The 'node' user in the official node images might not have write permission in /usr/src/app directly for new dirs
-# RUN mkdir -p game_web && chown node:node game_web
-# The build command is in package.json's scripts: "build:lovejs": "npx love.js . game_web -c --title Balatro"
-# npx will use the locally installed love.js from node_modules/.bin if available, or the global one.
-RUN npm run build:lovejs
+# Create the .love file
+# It's crucial that main.lua and conf.lua are at the root of this zip.
+# The COPY command above should ensure this if your project structure has them at the root.
+RUN cd /tmp/balatro-game-source && \
+    zip -r /tmp/game.love .
 
-# New stage for a smaller final image
+# Package game.love using love.js CLI
+# The output will be in /usr/src/build/game_web
+RUN love.js /tmp/game.love ./game_web -c --title Balatro
+
+# Stage 2: Setup the Node.js server and serve the packaged game
 FROM node:18-alpine
 
 WORKDIR /usr/src/app
 
-# Copy only necessary files from the builder stage
+# Copy package.json and install runtime dependencies
 COPY package.json ./
+# If package-lock.json exists, copy it too for deterministic installs
 COPY package-lock.json* ./
+# Only install production dependencies for the final image
 RUN npm install --omit=dev --ignore-scripts
-# We only need runtime dependencies (express) here, not love.js CLI tool
 
-COPY --from=builder /usr/src/app/server.js ./server.js
-COPY --from=builder /usr/src/app/index.html ./index.html
-COPY --from=builder /usr/src/app/web_api.lua ./web_api.lua
-# Copy the packaged game output
-COPY --from=builder /usr/src/app/game_web ./game_web
-# Copy the saves directory structure (even if empty, to ensure it exists with correct permissions)
-COPY --from=builder /usr/src/app/saves ./saves
+# Copy the server application files
+COPY server.js ./
+COPY web_api.lua ./
+# index.html here is the one I created earlier, which might be slightly different
+# from the one love.js generates inside game_web. The one inside game_web/index.html
+# is the one that will actually run the game.
+COPY index.html ./
 
-# Ensure the 'node' user owns the files and can write to 'saves'
-# The node user (UID 1000) is the default user in node:alpine images.
+# Copy the packaged game from the builder stage
+COPY --from=builder /usr/src/build/game_web ./game_web
+
+# Create and set permissions for the saves directory
 RUN mkdir -p saves && chown -R node:node /usr/src/app/saves
 
-# 6. Expose Port
+# Expose Port
 EXPOSE 3000
 
-# 7. Start Command
+# Start Command
 CMD [ "npm", "start" ]
