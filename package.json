@@ -1,0 +1,32 @@
+{
+  "name": "balatro-web",
+  "version": "1.0.0",
+  "description": "Web version of Balatro game, converted using Love.js and Express.js",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:lovejs:source": "cd /tmp/balatro-game-source && zip -r /tmp/game.love .",
+    "build:lovejs:package": "love.js /tmp/game.love /usr/src/app/game_web -c --title Balatro",
+    "build:lovejs": "echo \"This script is a placeholder. Dockerfile handles build steps directly.\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-repo-url-here.git"
+  },
+  "keywords": [
+    "love2d",
+    "love.js",
+    "lua",
+    "express",
+    "web-game"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "love.js": "^11.5.0"
+  }
+}

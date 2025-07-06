@@ -102,32 +102,3 @@ app.listen(port, () => {
         console.warn(`and ensure the output is placed in the 'game_web' directory.`);
     }
 });
-
-// Basic package.json content
-const packageJsonContent = {
-    name: "balatro-web",
-    version: "1.0.0",
-    description: "Web version of Balatro game",
-    main: "server.js",
-    scripts: {
-        "start": "node server.js",
-        "build:lovejs": "npx love.js . game_web -c --title Balatro"
-    },
-    dependencies: {
-        "express": "^4.17.1" // Using a common version, can be updated
-    },
-    devDependencies: {
-        "love.js": "^11.5.0" // Or the specific version you intend to use
-    }
-};
-
-// Create package.json if it doesn't exist
-const packageJsonPath = path.join(__dirname, 'package.json');
-if (!fs.existsSync(packageJsonPath)) {
-    fs.writeFileSync(packageJsonPath, JSON.stringify(packageJsonContent, null, 2), 'utf8');
-    console.log('package.json created successfully.');
-} else {
-    // Optionally, update existing package.json if certain scripts/deps are missing
-    // For simplicity, this part is omitted here.
-    console.log('package.json already exists.');
-}
