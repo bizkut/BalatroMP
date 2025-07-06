@@ -955,28 +955,30 @@ function Game:init_item_prototypes()
         for k, v in pairs(self.P_SEALS) do if not v.wip and not v.demo then table.insert(self.P_CENTER_POOLS['Seal'], v) end end
     end
 
-    -- This part of the original code is now inside the `if G.loaded_meta_data then` block above.
-    -- local meta = STR_UNPACK(get_compressed(G.SETTINGS.profile..'/'..'meta.jkr') or 'return {}')
-    -- meta.unlocked = meta.unlocked or {}
-    -- meta.discovered = meta.discovered or {}
-    -- meta.alerted = meta.alerted or {}
-    -- for k, v in pairs(self.P_CENTERS) do
-        if not v.wip and not v.demo then 
-            if TESTHELPER_unlocks then v.unlocked = true; v.discovered = true;v.alerted = true end --REMOVE THIS
-            if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) and meta.unlocked[k] then 
-                v.unlocked = true
-            end
-            if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) then self.P_LOCKED[#self.P_LOCKED+1] = v end
-            if not v.discovered and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^e_') or string.find(k, '^c_') or string.find(k, '^p_') or string.find(k, '^v_')) and meta.discovered[k] then 
-                v.discovered = true
-            end
-            if v.discovered and meta.alerted[k] or v.set == 'Back' or v.start_alerted then 
-                v.alerted = true
-            elseif v.discovered then
-                v.alerted = false
-            end
-        end
-    end
+    -- The following block was a remnant and caused a syntax error due to a commented out 'for' loop.
+    -- Its logic has been integrated into the `if G.loaded_meta_data then` block above.
+    -- -- This part of the original code is now inside the `if G.loaded_meta_data then` block above.
+    -- -- local meta = STR_UNPACK(get_compressed(G.SETTINGS.profile..'/'..'meta.jkr') or 'return {}')
+    -- -- meta.unlocked = meta.unlocked or {}
+    -- -- meta.discovered = meta.discovered or {}
+    -- -- meta.alerted = meta.alerted or {}
+    -- -- for k, v in pairs(self.P_CENTERS) do
+    --     if not v.wip and not v.demo then
+    --         if TESTHELPER_unlocks then v.unlocked = true; v.discovered = true;v.alerted = true end --REMOVE THIS
+    --         if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) and meta.unlocked[k] then
+    --             v.unlocked = true
+    --         end
+    --         if not v.unlocked and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^v_')) then self.P_LOCKED[#self.P_LOCKED+1] = v end
+    --         if not v.discovered and (string.find(k, '^j_') or string.find(k, '^b_') or string.find(k, '^e_') or string.find(k, '^c_') or string.find(k, '^p_') or string.find(k, '^v_')) and meta.discovered[k] then
+    --             v.discovered = true
+    --         end
+    --         if v.discovered and meta.alerted[k] or v.set == 'Back' or v.start_alerted then
+    --             v.alerted = true
+    --         elseif v.discovered then
+    --             v.alerted = false
+    --         end
+    --     end
+    -- end
 
     table.sort(self.P_LOCKED, function (a, b) return not a.order or not b.order or a.order < b.order end)
 
