@@ -1,35 +1,27 @@
-# Stage 1: Build the .love file
-FROM alpine AS lovefile_builder
+# Stage 1: Build the love.js package using npm version of love.js CLI
+FROM node:18-alpine AS builder
 
-# Install zip and git
-RUN apk add --no-cache zip git
+# Install zip for creating .love file (optional, but good practice if we decide to make a .love first)
+# and install love.js globally
+RUN apk add --no-cache zip && npm install love.js --global
 
-# Clone the game repository (or copy files if Docker context is the game repo)
-# For this Dockerfile, we assume the context IS the game repository.
-WORKDIR /tmp/balatro-game-source
+WORKDIR /usr/src/app
+
+# Copy all application code
+# Note: If the project is large, selectively copying (package.json first, then sources) is better for caching.
+# For simplicity here, copying all. This assumes package.json is at the root of the context.
 COPY . .
 
-# Clone the 2dengine/love.js repository to get fetch.lua
-WORKDIR /tmp
-RUN git clone --depth 1 https://github.com/2dengine/love.js.git lovejs_2dengine
-# Copy fetch.lua to the root of our game source, so it gets included in game.love
-RUN cp /tmp/lovejs_2dengine/fetch.lua /tmp/balatro-game-source/fetch.lua
+# Option 1: Package the current directory directly (if main.lua and conf.lua are at root)
+# RUN love.js . ./game_web -c --title Balatro
+# This command is now typically run via npm scripts as defined in package.json
 
-# Create the .love file from the game source (which now includes fetch.lua)
-WORKDIR /tmp/balatro-game-source
-RUN zip -r /tmp/game.love .
+# Option 2: Or, if package.json has the build script (more common)
+# First, ensure all dependencies (including dev like love.js if not global) are installed
+# RUN npm install # This would install love.js if it's in devDependencies
+RUN npm run build:lovejs # This script in package.json should be: "love.js . game_web -c --title Balatro"
 
-# Stage 2: Prepare the 2dengine/love.js player files
-FROM alpine AS player_builder
-
-RUN apk add --no-cache git
-
-WORKDIR /usr/src
-# Clone the specific love.js player repository
-RUN git clone --depth 1 https://github.com/2dengine/love.js.git lovejs_player_files
-# We'll copy from this stage later. This keeps the final image cleaner.
-
-# Stage 3: Setup the Node.js server and serve the packaged game
+# Stage 2: Setup the Node.js server and serve the packaged game
 FROM node:18-alpine
 
 WORKDIR /usr/src/app
@@ -42,31 +34,14 @@ RUN npm install --omit=dev --ignore-scripts
 # Copy the server application files
 COPY server.js ./
 COPY web_api.lua ./
-# The game's specific index.html (if any for instructions/etc) is less important now,
-# as the 2dengine/love.js index.html will be the entry point.
-# COPY index.html ./
+COPY index.html ./ # This is the root index.html for the Davidobot/love.js style player
 
-# Copy the .love file from the lovefile_builder stage
-COPY --from=lovefile_builder /tmp/game.love ./game.love
-
-# Copy the 2dengine/love.js player files from the player_builder stage
-COPY --from=player_builder /usr/src/lovejs_player_files/index.html ./lovejs_player/
-COPY --from=player_builder /usr/src/lovejs_player_files/player.js ./lovejs_player/
-COPY --from=player_builder /usr/src/lovejs_player_files/player.min.js ./lovejs_player/
-COPY --from=player_builder /usr/src/lovejs_player_files/style.css ./lovejs_player/
-COPY --from=player_builder /usr/src/lovejs_player_files/nogame.love ./lovejs_player/
-# Copy one specific LÖVE engine version, e.g., 11.5
-# Adjust if a different version is desired.
-COPY --from=player_builder /usr/src/lovejs_player_files/11.5 ./lovejs_player/11.5
-# If you need other versions (11.3, 11.4), copy them similarly.
-# COPY --from=player_builder /usr/src/lovejs_player_files/11.3 ./lovejs_player/11.3
-# COPY --from=player_builder /usr/src/lovejs_player_files/11.4 ./lovejs_player/11.4
-
+# Copy the packaged game from the builder stage
+COPY --from=builder /usr/src/app/game_web ./game_web
 
 # Create and set permissions for the saves directory
 RUN mkdir -p saves && chown -R node:node /usr/src/app/saves \
-    && chown -R node:node /usr/src/app/lovejs_player \
-    && chown node:node /usr/src/app/game.love
+    && chown -R node:node /usr/src/app/game_web # Ensure node user owns game_web too
 
 # Expose Port
 EXPOSE 3000

@@ -5,9 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:lovejs:source": "cd /tmp/balatro-game-source && zip -r /tmp/game.love .",
-    "build:lovejs:package": "love.js /tmp/game.love /usr/src/app/game_web -c --title Balatro",
-    "build:lovejs": "echo \"This script is a placeholder. Dockerfile handles build steps directly.\"",
+    "build:lovejs": "love.js . game_web -c --title Balatro",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

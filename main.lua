@@ -126,9 +126,6 @@ end
 function love.update( dt )
 	--Perf monitoring checkpoint
     timer_checkpoint(nil, 'update', true)
-    if love.fetch and love.fetch.update then
-        love.fetch.update(dt) -- Required by 2dengine/love.js's fetch.lua
-    end
     G:update(dt)
 end
 
