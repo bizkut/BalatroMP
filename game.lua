@@ -839,8 +839,8 @@ function Game:init_item_prototypes()
 
     self.P_LOCKED = {}
 
-    self:save_progress() # This call here will be problematic for web if save_progress itself becomes async or tries to save immediately.
-                         # For now, assuming save_progress just prepares data in G.ARGS for later.
+    self:save_progress() --# This call here will be problematic for web if save_progress itself becomes async or tries to save immediately.
+                         --# For now, assuming save_progress just prepares data in G.ARGS for later.
 
     -------------------------------------
     local TESTHELPER_unlocks = false and not _RELEASE_MODE
