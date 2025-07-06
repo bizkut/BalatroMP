@@ -43,7 +43,8 @@ RUN cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua we
 RUN cd /tmp/gamedata && zip -r /tmp/game.love .
 # 4. Run the cloned love.js CLI on the game.love
 # The output path ./game_web will be relative to /usr/src/app
-RUN node /opt/love.js-davidobot/index.js /tmp/game.love ./game_web -c --title Balatro
+# Allocate 128MB of memory for the Emscripten module (128 * 1024 * 1024 = 134217728 bytes)
+RUN node /opt/love.js-davidobot/index.js /tmp/game.love ./game_web -c --title Balatro -m 134217728
 # 5. Clean up (optional in builder, but good practice)
 RUN rm -rf /tmp/gamedata /tmp/game.love
 
