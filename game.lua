@@ -148,17 +148,18 @@ function Game:start_up()
         end
     end
     print("Game:start_up - Proceeding after settings load attempt.")
-
-    -- The rest of start_up depends on G.SETTINGS being populated.
-    -- local settings_ver = self.SETTINGS.version -- This was used if G.VERSION < '1.0.0'
+    print("Game:start_up - Initializing colors...")
 
     local new_colour_proto = self.C["SO_"..(self.SETTINGS.colourblind_option and 2 or 1)]
     self.C.SUITS.Hearts = new_colour_proto.Hearts
     self.C.SUITS.Diamonds = new_colour_proto.Diamonds
     self.C.SUITS.Spades = new_colour_proto.Spades
     self.C.SUITS.Clubs = new_colour_proto.Clubs
+    print("Game:start_up - Colors initialized.")
+    print("Game:start_up - boot_timer(start, settings)...")
 
     boot_timer('start', 'settings', 0.1)
+    print("Game:start_up - boot_timer(start, settings) done.")
 
     if self.SETTINGS.GRAPHICS.texture_scaling then
         self.SETTINGS.GRAPHICS.texture_scaling = self.SETTINGS.GRAPHICS.texture_scaling > 1 and 2 or 1
@@ -175,6 +176,7 @@ function Game:start_up()
 
     --create all sounds from resources and play one each to load into mem
     SOURCES = {}
+    print("Game:start_up - Initializing sound resources...")
     local sound_files = love.filesystem.getDirectoryItems("resources/sounds")
 
     for _, filename in ipairs(sound_files) do
@@ -184,12 +186,16 @@ function Game:start_up()
             SOURCES[sound_code] = {}
         end
     end
+    print("Game:start_up - Sound resources initialized.")
 
     self.SETTINGS.language = self.SETTINGS.language or 'en-us'
+    print("Game:start_up - boot_timer(settings, window init)...")
     boot_timer('settings', 'window init', 0.2)
     self:init_window()
+    print("Game:start_up - Window initialized.")
 
     if G.F_SOUND_THREAD then
+        print("Game:start_up - Initializing Sound Manager thread...")
         boot_timer('window init', 'soundmanager2')
         --call the sound manager to prepare the thread to play sounds
         self.SOUND_MANAGER = {
@@ -198,8 +204,12 @@ function Game:start_up()
             load_channel = love.thread.getChannel('load_channel')
         }
         self.SOUND_MANAGER.thread:start(1)
+        print("Game:start_up - Sound Manager thread started.")
 
         local sound_loaded, prev_file = false, 'none'
+        -- This while loop `while not sound_loaded and false do` will never run because of `and false`.
+        -- If it was meant to run, it could be a source of infinite loop/freeze.
+        -- Keeping it as is for now, assuming it's intentionally disabled.
         while not sound_loaded and false do
             --Monitor the channel for any new requests
             local request = self.SOUND_MANAGER.load_channel:pop() -- Value from channel
@@ -215,8 +225,10 @@ function Game:start_up()
         end
     
         boot_timer('soundmanager2', 'savemanager',0.22)
+        print("Game:start_up - Sound Manager setup done.")
     end
 
+    print("Game:start_up - Initializing Save Manager thread...")
     boot_timer('window init', 'savemanager')
     --call the save manager to wait for any save requests
     G.SAVE_MANAGER = {
@@ -224,8 +236,10 @@ function Game:start_up()
         channel = love.thread.getChannel('save_request')
     }
     G.SAVE_MANAGER.thread:start(2)
+    print("Game:start_up - Save Manager thread started.")
     boot_timer('savemanager', 'shaders',0.4)
 
+    print("Game:start_up - Initializing HTTP Manager thread...")
     --call the http manager
     G.HTTP_MANAGER = {
         thread = love.thread.newThread('engine/http_manager.lua'),
@@ -234,8 +248,13 @@ function Game:start_up()
     }
     if G.F_HTTP_SCORES then
         G.HTTP_MANAGER.thread:start()
+        print("Game:start_up - HTTP Manager thread started.")
+    else
+        print("Game:start_up - HTTP Manager thread not started (G.F_HTTP_SCORES is false).")
     end
+    print("Game:start_up - HTTP Manager setup done.")
 
+    print("Game:start_up - Loading shaders...")
     --Load all shaders from resources
     self.SHADERS = {}
     local shader_files = love.filesystem.getDirectoryItems("resources/shaders")
@@ -252,9 +271,11 @@ function Game:start_up()
             end
         end
     end
+    print("Game:start_up - Shaders loaded.")
 
     boot_timer('shaders', 'controllers',0.7)
 
+    print("Game:start_up - Initializing controller...")
     --Input handler/controller for game objects
     self.CONTROLLER = Controller()
     love.joystick.loadGamepadMappings("resources/gamecontrollerdb.txt")
@@ -266,24 +287,32 @@ function Game:start_up()
             end
         end
     end
+    print("Game:start_up - Controller initialized.")
     boot_timer('controllers', 'localization',0.8)
 
     if self.SETTINGS.GRAPHICS.texture_scaling then
         self.SETTINGS.GRAPHICS.texture_scaling = self.SETTINGS.GRAPHICS.texture_scaling > 1 and 2 or 1
     end
-
+    print("Game:start_up - Calling load_profile...")
     self:load_profile(G.SETTINGS.profile or 1)
+    print("Game:start_up - load_profile done.")
 
     self.SETTINGS.QUEUED_CHANGE = {}
-    self.SETTINGS.music_control = {desired_track = '', current_track = '', lerp = 1} 
-
+    self.SETTINGS.music_control = {desired_track = '', current_track = '', lerp = 1}
+    print("Game:start_up - Calling set_render_settings...")
     self:set_render_settings()
+    print("Game:start_up - set_render_settings done.")
 
+    print("Game:start_up - Calling set_language...")
     self:set_language()
+    print("Game:start_up - set_language done.")
 
+    print("Game:start_up - Calling init_item_prototypes...")
     self:init_item_prototypes()
+    print("Game:start_up - init_item_prototypes done.")
     boot_timer('protos', 'shared sprites',0.9)
 
+    print("Game:start_up - Initializing shared sprites...")
     --For globally shared sprites
     self.shared_debuff = Sprite(0, 0, self.CARD_W, self.CARD_H, self.ASSET_ATLAS["centers"], {x=4, y = 0})
 
@@ -325,11 +354,17 @@ function Game:start_up()
     --Create the event manager for the game
     self.E_MANAGER = EventManager()
     self.SPEEDFACTOR = 1
+    print("Game:start_up - Shared sprites initialized.")
 
+    print("Game:start_up - Calling set_profile_progress...")
     set_profile_progress()
+    print("Game:start_up - set_profile_progress done.")
     boot_timer('prep stage', 'splash prep',1)
+    print("Game:start_up - Calling splash_screen...")
     self:splash_screen()
+    print("Game:start_up - splash_screen done.")
     boot_timer('splash prep', 'end',1)
+    print("Game:start_up - End of start_up function.")
 end
 
 function Game:init_item_prototypes()
