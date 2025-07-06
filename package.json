@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:lovejs": "love.js . game_web -c --title Balatro",
+    "build:lovejs": "mkdir -p /tmp/gamedata && cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua web_api.lua /tmp/gamedata/ 2>/dev/null || : && cd /tmp/gamedata && zip -r /tmp/game.love . && cd /usr/src/app && love.js /tmp/game.love ./game_web -c --title Balatro && rm -rf /tmp/gamedata /tmp/game.love",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
