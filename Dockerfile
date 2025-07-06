@@ -1,31 +1,51 @@
-# Stage 1: Build the love.js package using npm version of love.js CLI
+# Stage 1: Build the love.js package using love.js CLI from Davidobot/love.js GitHub repo
 FROM node:18-alpine AS builder
 
-RUN apk add --no-cache zip && npm install love.js --global
+# Install git and zip
+RUN apk add --no-cache git zip
+
+# Clone Davidobot/love.js repository
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/Davidobot/love.js.git love.js-davidobot
+# The CLI tool is usually index.js in the root of this repo.
+# We might need to install its dependencies if any, but often it's self-contained or uses Node.js built-ins.
+# Let's assume for now its dependencies are minimal or handled by Node.js runtime.
+# If `love.js-davidobot/package.json` exists and has specific build steps or deps, they'd be needed.
+# For Davidobot/love.js, typically `npm install` within its directory might be needed if it has its own deps for the CLI.
+# However, often the CLI (index.js) can be run directly with `node`.
 
 WORKDIR /usr/src/app
 
 # Copy essential files for the build process first
 COPY package.json ./
 COPY package-lock.json* ./
-# If your main.lua, conf.lua are not at root, adjust paths or copy them specifically
 COPY main.lua ./
 COPY conf.lua ./
 COPY web_api.lua ./
-# Copy directories needed for the game
 COPY engine ./engine
 COPY functions ./functions
 COPY resources ./resources
 COPY localization ./localization
-# Add any other root .lua files or essential assets needed for the .love file or love.js packaging
 COPY *.lua ./
 
-# Install npm dependencies (if love.js CLI is part of devDependencies and not installed globally)
-# RUN npm install
+# The package.json's build:lovejs script is:
+# "build:lovejs": "mkdir -p /tmp/gamedata && cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua web_api.lua /tmp/gamedata/ 2>/dev/null || : && cd /tmp/gamedata && zip -r /tmp/game.love . && cd /usr/src/app && love.js /tmp/game.love ./game_web -c --title Balatro && rm -rf /tmp/gamedata /tmp/game.love"
+# We need to replace the `love.js` command in that script or call our cloned version directly.
+# For clarity, let's do the packaging steps directly here instead of relying on package.json for this part.
 
-# Run the build script defined in package.json
-# This script should handle creating game.love and then running love.js CLI
-RUN npm run build:lovejs
+# 1. Create a temporary directory for game files
+RUN mkdir -p /tmp/gamedata
+# 2. Copy necessary game files to /tmp/gamedata
+# Using existing files in /usr/src/app after the COPY operations above
+RUN cp -R *.lua engine/ functions/ resources/ localization/ conf.lua main.lua web_api.lua /tmp/gamedata/ 2>/dev/null || :
+# 3. Create game.love
+RUN cd /tmp/gamedata && zip -r /tmp/game.love .
+# 4. Run the cloned love.js CLI on the game.love
+# The output path ./game_web will be relative to /usr/src/app
+RUN node /opt/love.js-davidobot/index.js /tmp/game.love ./game_web -c --title Balatro
+# 5. Clean up (optional in builder, but good practice)
+RUN rm -rf /tmp/gamedata /tmp/game.love
+
 
 # Stage 2: Setup the Node.js server and serve the packaged game
 FROM node:18-alpine
@@ -40,7 +60,6 @@ RUN npm install --omit=dev --ignore-scripts
 # Copy the server application files
 COPY server.js ./server.js
 COPY web_api.lua ./web_api.lua
-# Explicitly copy index.html from the build context's root to the current directory in the image
 COPY ./index.html ./index.html
 
 # Copy the packaged game from the builder stage
@@ -49,7 +68,7 @@ COPY --from=builder /usr/src/app/game_web ./game_web
 # Create and set permissions for the saves directory
 RUN mkdir -p saves && chown -R node:node /usr/src/app/saves \
     && chown -R node:node /usr/src/app/game_web \
-    && chown node:node /usr/src/app/index.html # Also chown the copied index.html
+    && chown node:node /usr/src/app/index.html
 
 # Expose Port
 EXPOSE 3000
