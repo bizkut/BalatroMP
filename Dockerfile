@@ -18,7 +18,7 @@ COPY functions ./functions
 COPY resources ./resources
 COPY localization ./localization
 # Add any other root .lua files or essential assets needed for the .love file or love.js packaging
-COPY *.lua ./ 2>/dev/null || :
+COPY *.lua ./
 
 # Install npm dependencies (if love.js CLI is part of devDependencies and not installed globally)
 # RUN npm install
