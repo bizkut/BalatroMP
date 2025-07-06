@@ -243,7 +243,13 @@ function Game:start_up()
         local extension = string.sub(filename, -3)
         if extension == '.fs' then
             local shader_name = string.sub(filename, 1, -4)
-            self.SHADERS[shader_name] = love.graphics.newShader("resources/shaders/"..filename)
+            local fragment_shader_path = "resources/shaders/"..filename
+            if shader_name == 'splash' or shader_name == 'background' then -- Apply to potentially problematic shaders
+                print("Loading "..shader_name.." with custom default.vs")
+                self.SHADERS[shader_name] = love.graphics.newShader("resources/shaders/default.vs", fragment_shader_path)
+            else
+                self.SHADERS[shader_name] = love.graphics.newShader(fragment_shader_path)
+            end
         end
     end
 
