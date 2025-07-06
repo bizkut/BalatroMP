@@ -5,35 +5,63 @@ const fs = require('fs');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Directory where love.js output (packaged game) will be stored
-const gameDir = path.join(__dirname, 'game_web');
+// Directory for the 2dengine/love.js player files
+const playerDir = path.join(__dirname, 'lovejs_player');
+// Location of the game.love file
+const gameFile = path.join(__dirname, 'game.love'); // Placed at app root by Dockerfile
 
-// Middleware to serve static files from the love.js output directory
-app.use(express.static(gameDir));
 app.use(express.json()); // Middleware to parse JSON bodies
 
-// Route to serve the main game page
-app.get('/', (req, res) => {
-    const indexPath = path.join(gameDir, 'index.html');
-    if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
+// Middleware to set required HTTP headers for love.js (2dengine version)
+app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    next();
+});
+
+// Serve static files from the lovejs_player directory (e.g., player.js, LÖVE engine versions)
+app.use('/lovejs_player', express.static(playerDir));
+
+// Serve the game.love file itself if requested directly (e.g. by player.js)
+// The player.js will fetch it relative to its own path or via absolute path.
+// Let's make game.love available at a predictable path e.g. /games/game.love
+app.get('/game.love', (req, res) => {
+    if (fs.existsSync(gameFile)) {
+        res.sendFile(gameFile);
     } else {
-        // If index.html doesn't exist in gameDir, it means the game hasn't been packaged yet.
-        // Send a placeholder message or handle as an error.
-        // For now, also serve the top-level index.html if gameDir/index.html is missing.
-        const rootIndexPath = path.join(__dirname, 'index.html');
-        if (fs.existsSync(rootIndexPath)) {
-            res.sendFile(rootIndexPath);
-        } else {
-            res.status(404).send('Game not found. Please ensure the game has been packaged into the game_web directory.');
-        }
+        res.status(404).send('game.love not found on server.');
+    }
+});
+// Also make it available if player.js tries to fetch from /games/ directory
+app.get('/games/game.love', (req, res) => {
+    if (fs.existsSync(gameFile)) {
+        res.sendFile(gameFile);
+    } else {
+        res.status(404).send('game.love not found in /games/.');
+    }
+});
+
+
+// Main route to serve the game player
+// This will redirect to the love.js player's index.html with the game specified
+app.get('/', (req, res) => {
+    const playerIndexPath = path.join(playerDir, 'index.html');
+    if (fs.existsSync(playerIndexPath)) {
+        // Redirect to the player, instructing it to load game.love from the root
+        // player.js will try to load game from ?g= parameter.
+        // If game.love is at /usr/src/app/game.love, and player files are in /usr/src/app/lovejs_player
+        // player.js (inside lovejs_player) will look for `../game.love` if g=../game.love
+        // or `/game.love` if g=/game.love
+        res.redirect('/lovejs_player/index.html?g=../game.love&v=11.5');
+    } else {
+        res.status(404).send('Love.js player not found. Please ensure player files are in lovejs_player directory.');
     }
 });
 
 // API routes for saving/loading game data
 const SAVES_DIR = path.join(__dirname, 'saves');
 if (!fs.existsSync(SAVES_DIR)){
-    fs.mkdirSync(SAVES_DIR, { recursive: true });
+    fs.mkdirSync(SAVES_DIR, { recursive: true }); // Ensure SAVES_DIR is defined
 }
 
 // Save game data
@@ -95,10 +123,12 @@ app.get('/api/load', (req, res) => {
 
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
-    console.log(`Serving game from: ${gameDir}`);
-    if (!fs.existsSync(gameDir) || !fs.existsSync(path.join(gameDir, 'index.html'))) {
-        console.warn(`Warning: The directory ${gameDir} or ${path.join(gameDir, 'index.html')} does not exist yet.`);
-        console.warn(`Make sure to run the love.js packaging command (e.g., 'npx love.js . game_web -c')`);
-        console.warn(`and ensure the output is placed in the 'game_web' directory.`);
+    console.log(`Serving LÖVE game player from: ${playerDir}`);
+    console.log(`Game file expected at: ${gameFile}`);
+    if (!fs.existsSync(playerDir) || !fs.existsSync(path.join(playerDir, 'index.html'))) {
+        console.warn(`Warning: The directory ${playerDir} or its index.html does not exist yet.`);
+    }
+    if (!fs.existsSync(gameFile)) {
+        console.warn(`Warning: The game file ${gameFile} does not exist yet.`);
     }
 });

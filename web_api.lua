@@ -1,139 +1,131 @@
 -- web_api.lua
--- Handles communication with the web server for saving and loading game data.
+-- Handles communication with the web server for saving and loading game data
+-- using fetch.lua from 2dengine/love.js
+
+local json = require("engine.json") -- Assuming a JSON library is available.
+                                    -- If not, a simple one needs to be included or written.
+                                    -- For now, let's assume one exists at this path.
+                                    -- If it's part of the main game files, it will be in game.love
 
 local M = {}
+local fetch_module_loaded = false
+local fetch -- Stores the fetch module
 
--- Helper to convert Lua table to JSON string for simple cases.
--- Note: This is a very basic JSON encoder. For complex tables, a robust library would be better.
--- However, we are primarily sending STR_PACK'ed strings.
-local function table_to_json(tbl)
-    local parts = {}
-    for k, v in pairs(tbl) do
-        local key_str
-        if type(k) == "string" then
-            key_str = string.format("%q", k)
-        elseif type(k) == "number" then
-            key_str = tostring(k)
-        else
-            error("JSON key must be string or number")
-        end
-
-        local val_str
-        if type(v) == "string" then
-            val_str = string.format("%q", v)
-        elseif type(v) == "number" or type(v) == "boolean" then
-            val_str = tostring(v)
-        elseif type(v) == "table" then
-            -- Recursive call for nested tables (not deeply tested here)
-            val_str = table_to_json(v)
-        elseif v == nil then
-            val_str = "null"
-        else
-            error("Unsupported JSON value type: " .. type(v))
-        end
-        table.insert(parts, key_str .. ":" .. val_str)
+-- Attempt to load fetch.lua. It should be at the root of the .love file.
+local success, err = pcall(function()
+    fetch = require("fetch")
+    if fetch and fetch.request and fetch.update then
+        fetch_module_loaded = true
+        print("web_api.lua: fetch.lua loaded successfully.")
+    else
+        print("web_api.lua: Failed to load fetch.lua or module is invalid.")
+        fetch = nil -- Ensure it's nil if not fully loaded
     end
-    return "{" .. table.concat(parts, ",") .. "}"
+end)
+
+if not success then
+    print("web_api.lua: Error requiring fetch.lua: " .. tostring(err))
 end
 
 
 -- Saves game data to the web server.
 -- save_identifier: e.g., 'run', 'profile', 'settings'
 -- data_to_save_str: The string representation of the data (e.g., from STR_PACK).
-function M.save_data_to_web(save_identifier, data_to_save_str, callback)
-    local payload = table_to_json({ id = save_identifier, data = data_to_save_str })
-    local js_code = string.format([[
-        fetch('/api/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: %s
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                console.log('Save successful:', data.message);
-                if (typeof %s === 'function') %s(true, data.message);
-            } else {
-                console.error('Save failed:', data.message);
-                if (typeof %s === 'function') %s(false, data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Error saving game via web API:', error);
-            if (typeof %s === 'function') %s(false, 'Network or server error during save.');
-        });
-    ]], payload, callback, callback, callback, callback, callback, callback) -- Pass callback name multiple times
+-- user_callback_name_str: Name of the global Lua function to call upon completion.
+function M.save_data_to_web(save_identifier, data_to_save_str, user_callback_name_str)
+    if not fetch_module_loaded or not fetch then
+        print("WebAPI Error: fetch.lua not available for saving.")
+        if _G[user_callback_name_str] then _G[user_callback_name_str](false, "fetch.lua not available") end
+        return
+    end
 
-    -- love.system.getOS() can differentiate if more specific JS bridging is needed
-    if js and js.eval then
-        js.eval(js_code)
-    elseif love.system and love.system.getOS() == "Web" then
-        -- Potentially another way to execute JS if js.eval is not directly available
-        -- For now, assume js.eval from Love.js context
-        error("js.eval not available, cannot make HTTP POST request for saving.")
-    else
-        print("Web API: Not running in a web environment, save skipped.")
-        if callback then callback(false, "Not in web environment") end
-    }
+    if not json then
+        print("WebAPI Error: JSON library not available for saving.")
+        if _G[user_callback_name_str] then _G[user_callback_name_str](false, "JSON library not available") end
+        return
+    end
+
+    local payload_table = { id = save_identifier, data = data_to_save_str }
+    local payload_json_str, err_json = json.encode(payload_table)
+
+    if err_json then
+        print("WebAPI Error: Failed to encode JSON for saving: " .. tostring(err_json))
+        if _G[user_callback_name_str] then _G[user_callback_name_str](false, "JSON encoding error") end
+        return
+    end
+
+    local headers = { ["Content-Type"] = "application/json" }
+
+    print("WebAPI: Attempting to save data for ID: " .. save_identifier)
+    fetch.request("/api/save", "POST", payload_json_str, headers, function(code, body)
+        print("WebAPI Save Callback: HTTP Status Code: ", code)
+        -- print("WebAPI Save Callback: Body: ", body) -- Can be very verbose
+        if not _G[user_callback_name_str] then return end
+
+        if code >= 200 and code < 300 then
+            local success_parse, parsed_body = pcall(json.decode, body)
+            if success_parse and parsed_body and parsed_body.success then
+                _G[user_callback_name_str](true, parsed_body.message or "Save successful.")
+            elseif success_parse and parsed_body and parsed_body.message then
+                 _G[user_callback_name_str](false, "Save request failed on server: " .. parsed_body.message)
+            else
+                _G[user_callback_name_str](false, "Save failed with HTTP " .. code .. ". Malformed server response.")
+            end
+        else
+            _G[user_callback_name_str](false, "Save failed with HTTP status " .. code .. ". Body: " .. body)
+        end
+    end)
 end
 
 -- Loads game data from the web server.
 -- save_identifier: e.g., 'run', 'profile', 'settings'
--- callback: function(success, data_str_or_error_msg)
-function M.load_data_from_web(save_identifier, callback)
-    local js_code = string.format([[
-        fetch('/api/load?id=%s') // Pass identifier as query param for GET
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('Load successful for %s');
-                    if (typeof %s === 'function') {
-                        // data.data here is the object { id: "...", data: "..." } from server
-                        // or null if no save file was found.
-                        if (data.data && data.data.data) {
-                           %s(true, data.data.data); // Pass the actual STR_PACK'ed string
-                        } else if (data.data === null) {
-                           %s(true, null); // No save file found
-                        } else {
-                           %s(false, 'Received malformed data from server.');
-                        }
-                    }
-                } else {
-                    console.error('Load failed for %s:', data.message);
-                    if (typeof %s === 'function') %s(false, data.message);
-                }
-            })
-            .catch(error => {
-                console.error('Error loading game via web API for %s:', error);
-                if (typeof %s === 'function') %s(false, 'Network or server error during load.');
-            });
-    ]], save_identifier, save_identifier, callback, callback, callback, callback, save_identifier, callback, callback, save_identifier, callback, callback)
+-- user_callback_name_str: Name of the global Lua function(success, data_str_or_error_msg)
+function M.load_data_from_web(save_identifier, user_callback_name_str)
+    if not fetch_module_loaded or not fetch then
+        print("WebAPI Error: fetch.lua not available for loading.")
+        if _G[user_callback_name_str] then _G[user_callback_name_str](false, "fetch.lua not available") end
+        return
+    end
 
-    if js and js.eval then
-        js.eval(js_code)
-    elseif love.system and love.system.getOS() == "Web" then
-        error("js.eval not available, cannot make HTTP GET request for loading.")
-    else
-        print("Web API: Not running in a web environment, load skipped.")
-        if callback then callback(false, "Not in web environment") end
-    }
+     if not json then
+        print("WebAPI Error: JSON library not available for loading.")
+        if _G[user_callback_name_str] then _G[user_callback_name_str](false, "JSON library not available") end
+        return
+    end
+
+    local url = "/api/load?id=" .. fetch.urlencode(save_identifier) -- Assuming fetch.urlencode exists or using a simple one.
+                                                                   -- fetch.lua from 2dengine might not have urlencode.
+                                                                   -- For simple IDs, it might not be strictly necessary.
+
+    print("WebAPI: Attempting to load data for ID: " .. save_identifier .. " from URL: " .. url)
+    fetch.request(url, "GET", nil, {}, function(code, body)
+        print("WebAPI Load Callback: HTTP Status Code: ", code)
+        -- print("WebAPI Load Callback: Body: ", body) -- Can be very verbose
+        if not _G[user_callback_name_str] then return end
+
+        if code >= 200 and code < 300 then
+            local success_parse, parsed_body = pcall(json.decode, body)
+            if success_parse and parsed_body and parsed_body.success then
+                if parsed_body.data and parsed_body.data.data then -- Server returns { success: true, data: { id: "...", data: "STR_PACK_str" } }
+                    _G[user_callback_name_str](true, parsed_body.data.data)
+                elseif parsed_body.data == nil then -- No save file found
+                     _G[user_callback_name_str](true, nil)
+                else
+                    _G[user_callback_name_str](false, "Load failed: Malformed data structure in server response.")
+                end
+            elseif success_parse and parsed_body and parsed_body.message then
+                _G[user_callback_name_str](false, "Load request failed on server: " .. parsed_body.message)
+            else
+                 _G[user_callback_name_str](false, "Load failed with HTTP " .. code .. ". Malformed server response body.")
+            end
+        else
+            _G[user_callback_name_str](false, "Load failed with HTTP status " .. code .. ". Body: " .. body)
+        end
+    end)
 end
 
--- For this to work, the Lua functions passed as callbacks need to be globally accessible
--- or registered in a way that the JS environment can call them.
--- A common pattern is to register Lua callbacks with unique names and pass those names to JS.
--- Example:
--- local callbacks = {}
--- local next_callback_id = 1
--- function M.register_callback(cb_func)
---   local id = "lua_callback_" .. next_callback_id
---   callbacks[id] = cb_func
---   next_callback_id = next_callback_id + 1
---   return id
--- end
--- And then JS calls `Module.ccall('execute_lua_callback', null, ['string', 'boolean', 'string'], [callback_id, success, data_or_message])`
--- where `execute_lua_callback` is a C function exported from Lua via ffi that calls callbacks[callback_id](success, data_or_message).
--- For simplicity here, I am assuming the callback function name passed as string is globally accessible or js.eval handles it.
--- Love.js might provide a more direct way to do this. If not, the above pattern is more robust.
+-- Ensure this file is required by the game (e.g. in main.lua or game.lua)
+-- And fetch.lua must be available in the .love archive at the root.
+-- Also, a JSON library (here assumed as engine.json) must be available.
 
 return M
