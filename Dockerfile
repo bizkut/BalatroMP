@@ -7,12 +7,13 @@ RUN apk add --no-cache git zip
 # Clone Davidobot/love.js repository
 WORKDIR /opt
 RUN git clone --depth 1 https://github.com/Davidobot/love.js.git love.js-davidobot
-# The CLI tool is usually index.js in the root of this repo.
-# We might need to install its dependencies if any, but often it's self-contained or uses Node.js built-ins.
-# Let's assume for now its dependencies are minimal or handled by Node.js runtime.
-# If `love.js-davidobot/package.json` exists and has specific build steps or deps, they'd be needed.
-# For Davidobot/love.js, typically `npm install` within its directory might be needed if it has its own deps for the CLI.
-# However, often the CLI (index.js) can be run directly with `node`.
+
+# Install dependencies for the cloned love.js CLI tool
+WORKDIR /opt/love.js-davidobot
+# Check if package.json exists before running npm install
+# Some versions/forks might not have it or might bundle dependencies.
+# Davidobot/love.js does have a package.json with commander.
+RUN if [ -f package.json ]; then npm install; fi
 
 WORKDIR /usr/src/app
 
